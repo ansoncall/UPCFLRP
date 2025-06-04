@@ -1,0 +1,13 @@
+name: UPCFLRP_2024_plot_mapper
+title: UPCFLRP_2024_plot_mapper
+username: reshapewildfire
+account: reshapewildfire
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14541925
+bundleId: 10127863
+url: https://reshapewildfire.shinyapps.io/UPCFLRP_2024_plot_mapper/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: raw/RA_data_Master_20250224.xlsx

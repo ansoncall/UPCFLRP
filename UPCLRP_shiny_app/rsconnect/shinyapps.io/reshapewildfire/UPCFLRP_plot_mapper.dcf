@@ -1,0 +1,12 @@
+name: UPCFLRP_plot_mapper
+title: UPCFLRP_plot_mapper
+username: reshapewildfire
+account: reshapewildfire
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14542134
+bundleId: 10127892
+url: https://reshapewildfire.shinyapps.io/UPCFLRP_plot_mapper/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
