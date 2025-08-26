@@ -5,12 +5,26 @@ library(magrittr)
 library(viridis)
 library(crayon)
 library(readxl)
-d <- read_excel("raw/RA_data_Master_20250224.xlsx", sheet = "Overstory") %>%
+d <- read_excel("raw/RA_data_Master_202500619.xlsx", sheet = "Overstory") %>%
   # tidy names
   set_names(c("date", "t_idx", "id", "plot_type", "midline_dist", "s_dist",
               "n_dist", "species", "status", "damage1", "damage2", "dbh",
               "cbh_class", "standing_class", "field_notes", "entry_notes",
               "changed"))
+
+# check id ####
+# some IDS were recorded incorrectly. Fix those here by recoding where
+# necessary.
+d %<>%
+  mutate(id = case_when(
+    id == "9D" ~ "RA9D", # fix missing prefix
+    id == "RA 810" ~ "RA810", # fix inconsistent spacing
+    id == "RA216" ~ "RA219", # NEW FIX based on examination of data and notes
+    # id == "RA2160" ~ "RA216", # THESE ARE NOT THE SAME
+    # id == "RA2510" ~ "RA251", # THESE ARE NOT THE SAME
+    # id == "RA2610" ~ "RA261", # THESE ARE NOT THE SAME
+    .default = id
+  ))
 
 # check dates ####
 d %>% filter(is.na(date) | is.null(date)) # no na or null, good
@@ -38,13 +52,14 @@ d %>% filter(t_idx == "PRE", id == "RA2500", date == as.Date("2017-07-07"))
 
 # examine carefully to group dates where necessary:
 for (i in seq_along(unique(foo$id))) {
-  plot <- foo %>% filter(id == unique(d$id)[i])
+  plot <- foo %>% filter(id == unique(foo$id)[i])
   cat(blue(paste(i, unique(foo$id)[i]), "\n"))
   print(plot %>% arrange(date), n = nrow(plot))
 }
 # issues:
 date_issues <- c("L23", "RA1210", "RA219", "RA2300", "RA2500",
                  "RA271", "RA410")
+
 for (i in seq_along(date_issues)) {
   plot <- foo %>% filter(id == date_issues[i])
   cat(blue(paste(i, date_issues[i]), "\n"))
@@ -138,6 +153,33 @@ d %<>% mutate(date_corrected = case_when(
   is.na(date_corrected) ~ date,
   .default = date_corrected))
 
+# some other plots with two pre-treatment visit dates.
+two_visit_sites <- c("L7", "L29", "L8", "L10", "L11")
+
+d %>% filter(id %in% two_visit_sites) %>%
+  group_by(id, t_idx, date_corrected) %>%
+  summarise(count = n(), .groups = "keep") %>%
+  arrange(id, t_idx, date_corrected)
+# L11 2013 visit should probably be thrown out, as the data quality of that crew
+# leader is suspect and the 2015 data is likely better.
+treemap(d %>%
+          filter(id == "L10" & date < as.Date("2016-01-01")) %>%
+          mutate(date = as.character(date),
+                 dbh = as.numeric(dbh)))
+
+
+# L10 2013 visit should probably be thrown out, but there was never a treatment
+# completed so it is a nothingburger.
+treemap(d %>%
+          filter(id == "L11" & date < as.Date("2016-01-01")) %>%
+          mutate(date = as.character(date),
+                 dbh = as.numeric(dbh)))
+
+
+d %>% filter(id == "L29") %>%
+  arrange(as.numeric(dbh)) %>% View
+
+
 foo <- d %>%
   # (re)count number of records in each group
   group_by(t_idx, id, date_corrected) %>%
@@ -169,8 +211,6 @@ unique(d$t_idx) # no missing values, some weird values
 d %<>%
   mutate(t_idx = case_when(t_idx == "PRE?" ~ "PRE",
                            .default = t_idx))
-# check id ####
-# nothing to check?
 
 # check plot_type ####
 unique(d$plot_type) # some NA
@@ -240,6 +280,7 @@ d %<>%
     species == "UNKFIR" | species == "UNKFl" | species == "UNKID" ~ "UNK",
     species == "Abla" ~ "ABLA",
     species == "psme" ~ "PSME",
+    species == "ps,e" ~ "PSME",
     species == "POTR" ~ "POTR5",
     .default = species
   ))
@@ -271,12 +312,15 @@ d %<>%
   ))
 
 # check dbh ####
+# dbh should be numeric
+# try converting to numeric and check the ones that fail conversion
+d %>% mutate(dbhNA = is.na(as.numeric(dbh))) %>%
+  filter(dbhNA)
+# idk what to do about these, just dropping them. probably missing data.
+d %<>% mutate(dbh = as.numeric(dbh)) %>% filter(!is.na(dbh))
 hist(d$dbh, breaks = 50) # some issues here
 d %>% arrange(desc(dbh)) %>% filter(dbh > 50)
 d %>% arrange(dbh)
-d %>% filter(!is.numeric(dbh))
-# I saw a few non-numeric values in the spreadsheet, but those were converted to
-# NA on import. See warnings() after readxl() import.
 # leaving all this alone, though 121 dbh aspen is pretty much impossible.
 # Perhaps wrong unit or missing decimals for some of these?
 
@@ -287,7 +331,7 @@ d %<>% mutate(
     cbh_class == "." ~ NA_integer_,
     cbh_class == "UNK" ~ NA_integer_,
     cbh_class == "7" ~ NA_integer_, # class 7 not defined
-    .default = cbh_class
+    .default = as.integer(cbh_class)
   ))
 )
 
@@ -305,7 +349,7 @@ d %<>% mutate(
 d_tidy <- d %>%
   # drop unneeded columns
   select(id, t_idx, date = date_corrected, midline_dist, s_dist, n_dist,
-         species, dbh, standing_class) %>%
+         species, dbh, standing_class, status) %>%
   mutate(# convert n_dist to -s_dist, merge s_dist and n_dist
     y = case_when(!is.na(s_dist) ~ s_dist,
                   is.na(s_dist) ~ -n_dist),
@@ -323,61 +367,25 @@ temporal_index <- d_tidy %>%
 # add t_idxn to the original data
 d_tidy %<>%
   left_join(temporal_index, by = c("id", "t_idx", "date")) %>%
-  relocate(id, t_idx, t_idxn, date, x, y, species, dbh, standing_class)
+  relocate(id, t_idx, t_idxn, date, x, y, species, dbh, standing_class, status)
 
 d_tidy
 # export
 write_csv(d_tidy, "overstory_tidy.csv")
 
-# map large trees ####
+# ntrees data
+ntrees <- d_tidy %>%
+  group_by(id, t_idxn) %>%
+  summarise(ntrees = n(), .groups = "keep") %>%
+  ungroup() %>%
+  pivot_wider(names_from = t_idxn, values_from = ntrees) %>%
+  rowwise %>%
+  mutate(mean = mean(c_across(starts_with("P")), na.rm = TRUE),
+         sd = sd(c_across(starts_with("P")), na.rm = TRUE),
+         coef_variation = ifelse(mean == 0, NA, sd / mean)) %>%
+  select(id, starts_with("PRE"), starts_with("POST_"), starts_with("POSTRX"),
+         mean, coef_variation) %>%
+  arrange(desc(coef_variation))
 
-# TODO add option to switch whether pre or post is the landmark
-prep_data <- function(
-    plot_data, rank_n = 10, dbh_offset = 2
-) {
-  # grab the pre- and post-treatment data separately and assign size ranks
-  tmd_pre <- plot_data %>%
-    filter(t_idx == "PRE") %>%
-    mutate(size_rank = row_number())
-  tmd_post <- plot_data %>%
-    filter(t_idx == "POST") %>%
-    mutate(size_rank = row_number())
-  # choose (rank_n) largest trees from the pre-treatment data to be landmarks
-  landmarks <- tmd_pre %>%
-    filter(size_rank <= rank_n)
-  # choose post-treatment trees that are within (dbh_offset) of the landmark dbh
-  n_rank_dbh <- landmarks %>% pull(dbh) %>% min()
-  tmd_post_trimmed <- tmd_post %>%
-    filter(dbh >= n_rank_dbh - dbh_offset)
-  # combine the pre-treatment landmarks and the post-treatment trees
-  stack <- rbind(landmarks, tmd_post_trimmed)
-  return(stack)
-}
-
-plot_trees <- function(map_data) {
-  ggplot(map_data,
-         aes(x = x, y = y, color = t_idx, fill = species, size = dbh)) +
-    geom_point(pch = 21, stroke = 2) +
-    scale_color_manual(values = c("PRE" = "red",
-                                  "POST" = alpha("black", 0.4))) +
-    scale_fill_viridis(discrete = TRUE, alpha = 0.7) +
-    labs(title = paste0("Plot: ", map_data$id[1]),
-         y = "north/south distance",
-         x = "midline distance") +
-    theme_minimal() +
-    expand_limits(x = c(-2, 162), y = c(-82, 82))
-}
-
-make_map <- function(plot, rank_n = 10, dbh_offset = 3) {
-  map_data <- prep_data(plot, rank_n, dbh_offset)
-  plot_trees(map_data)
-}
-
-id_list <- unique(d_tidy$id)
-for (i in seq_along(id_list)) {
-  plot <- d_tidy %>% filter(id == id_list[i])
-  print(paste(i, id_list[i]))
-  p <- make_map(plot, rank_n = 10, dbh_offset = 2)
-  print(p)
-}
-unique(d_tidy$id) %>% length()
+# write out ####
+write_csv(ntrees, "ntrees.csv")
