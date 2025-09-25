@@ -2,7 +2,10 @@
 title: "UPCFLRP Data Exploration"
 author: "Anson Call"
 date: "`r Sys.Date()`"
-output: html_document
+output: 
+  html_document:
+    code_folding: hide
+  
 ---
 
 ```{r setup, include=FALSE}
@@ -53,31 +56,32 @@ From the [plot mapper](https://reshapewildfire.shinyapps.io/UPCFLRP_plot_mapper/
 
 ```{r plot-mapper-problem-plots, echo=FALSE}
 half_plots <- c(
-  "RA261", # not actually a half plot?
-  "RA1310" # confirmed half plot
+  "RA1310", # confirmed half plot PRE_1
+  "RA710" # confirmed half plot POSTRX_1
   )
 
-ntrees <- read.csv("UPCLRP_shiny_app/ntrees.csv")
+ntrees <- read.csv("ntrees.csv")
 ntrees %>%
   filter(id %in% half_plots)
 ```
 
-The following plots are not exactly half-plots, but it's clear there is some incompleteness in the southeast quadrant:
+The following plot is not exactly a half-plot, but it's clear there is some incompleteness in the southeast quadrant:
 
 ```{r plot-mapper-problem-plots-continued, echo=FALSE}
 partial_plots <- c(
-  "RA219", # issue here is missing "RA216" data
-  "RA2040", # issue here is extra trees (beyond )
-  "RA710" # actually IS a half plot
+  "RA2040" # missing trees in SE quadrant of POSTRX_1
   )
 
-ntrees <- read.csv("UPCLRP_shiny_app/ntrees.csv")
+ntrees <- read.csv("ntrees.csv")
 ntrees %>%
   filter(id %in% partial_plots)
 ```
 
 ### Other issues
 #### Inconsistent DBH thresholds
+
+**Update 9/4/2025: DBH cutoff of >= 8 has been implemented. This section can now be ignored**
+
 The following plots do not have evidence of the "half-plot" problem, but do have a high coefficient of variation, possibly because the lower DBH threshold for recording trees was not consistent across visits, as noted by Maggie:
 
 ```{r plot-mapper-problem-plots-continued_2, echo=FALSE}
@@ -86,7 +90,7 @@ addl_high_cv_plots <- c(
   "RA281", "L10", "RA410", "L12", "L13", "L24"
 )
 
-ntrees <- read.csv("UPCLRP_shiny_app/ntrees.csv")
+ntrees <- read.csv("ntrees.csv")
 ntrees %>%
   filter(coef_variation > 0.2)
 ```
@@ -272,7 +276,6 @@ old_hists <- map(key_plots, \(x) mk_dbh_hist(x, overstory) +
 new_hists <- map(key_plots, \(x) mk_dbh_hist(x, overstory_min8) + 
                    labs(subtitle = "NEW"))
 
-str(new_hists)
 dual_plot <- \(x, y) {
   plots <- list(x, y)
   p <- ggarrange(x, y, nrow = 2)
@@ -314,31 +317,305 @@ out %>%
   column_spec(4, background = "#C7F9FF7F") %>% 
   row_spec(which(out$aspen_perc_rank > 0.75), bold = TRUE) %>% 
   scroll_box(width = "100%", height = "800px") 
+
+high_aspen <- out %>% filter(aspen_proportion >= 0.3) %>% pull(id)
+  
 ```
 
-# TODO
-  - address maggie's email: some plots (e.g. RA261 and RA2610) may be improperly lumped together in `overstory.R`
-  - stump data
-  - lay out full diagnosis and recommend and solution for each plot
+# Stump data
+  
+Many plots have stump data, but only a few specific plots have stump data that was specifically collected in an effort to recreate data from earlier site visits where data collection may have been incomplete.
 
-#### Stump data
-
-Finally, I checked to see which plots had stump data, because I think these are the plots that were of concern previously. 
+Here, we review which plots have stump data and highlight the ones that we specifically need to take a closer look at. None of these were tagged as half- or partial-plots, though some do have potential aspen regen. 
 
 ```{r stump-dbh, echo=FALSE}
-overstory_raw <- suppressWarnings(
-  readxl::read_excel("raw/RA_data_Master_20250224.xlsx", 
-                                    sheet = "Overstory")
-  )
-overstory_raw %>% 
-  filter(Status == "S" & !is.null(DBH)) %>% 
-  pull(PLOT) %>% 
-  unique()
+
+# plots specifically identified by marin as having "reconstruction" stump data
+reconstruction_plots <- c("L12",
+                          "L27",
+                          "L7",
+                          "L9",
+                          "RA178",
+                          "RA281",
+                          "9A",
+                          "9B",
+                          "9D",
+                          "3A",
+                          "RA2540",
+                          "RA1110",
+                          "RA1410",
+                          "RA610",
+                          "RA2010")
+reconstruction_plots %>% 
+  as_tibble %>%
+  set_names("id") %>% 
+    kbl() %>%
+  kable_paper() %>%
+  scroll_box(width = "100%", height = "800px") 
+
+
+
+test <- overstory %>%
+  group_by(id, t_idxn) %>%
+  summarise(ntrees = n(), .groups = "keep") %>%
+  ungroup() %>%
+  pivot_wider(names_from = t_idxn, values_from = ntrees) %>%
+  rowwise %>%
+  mutate(mean = mean(c_across(starts_with("P")), na.rm = TRUE),
+         sd = sd(c_across(starts_with("P")), na.rm = TRUE),
+         coef_variation = ifelse(mean == 0, NA, sd / mean)) %>%
+  select(id, starts_with("PRE"), starts_with("POST_"), starts_with("POSTRX"),
+         mean, coef_variation) %>%
+  arrange(desc(coef_variation)) %>% 
+  ungroup %>% 
+  filter(id %in% reconstruction_plots) %>% 
+  mutate(notes = case_when(
+    id %in% high_aspen ~ ">30% aspen",
+    .default = ""
+  ))
+
+test %>%
+  kbl() %>%
+  kable_paper() %>%
+  row_spec(which(test$coef_variation >= 0.2), bold = TRUE) %>% 
+  scroll_box(width = "100%", height = "800px") 
+  
 ```
 
-I'm seeing another issue: the plot IDs do not seem to be recorded consistently. _2025/07/22 update:_ this has now been fixed in overstory.R.\n See the `# check id ####` section. 
+Only ~4 of these plots actually have weird values, and of those 2 have a major aspen component.  
 
-Additionally, there are lots of plots which have only one site visit:
+Though, note that the following plots also have stump data from 2024. Are we sure we don't want to look at these as well?
+
+```{r stump-dbh-2, echo=FALSE}
+
+`%ni%` <- Negate(`%in%`)
+
+out2 <- overstory %>% 
+  filter(status == "S" & !is.null(dbh) & date > as.POSIXct("2024-01-01 00:00:00")) %>%
+  select(id) %>% 
+  arrange(id) %>% 
+  unique() %>%
+  filter(id %ni% reconstruction_plots)
+
+out2 %>% 
+  kbl() %>%
+  kable_paper() %>%
+  row_spec(which(out2$t_idxn == "PRE_1" | out2$t_idxn == "PRE_2"), background = "#C7F9FF7F") %>% 
+  scroll_box(width = "100%", height = "800px") 
+
+```
+
+## Plotting stump data
+
+Let's look closely at RA178, which is seemingly where the biggest problem lies. The PRE_1 count was exceptionally low.
+
+Uh oh - problem. The 2024 "reconstruction" visit does not include the locations of any recorded trees. It only includes the quadrant. This means we can't actually plot out the locations to see whether
+
+!["RA178 raw datasheet"](./images/RA178_2024_datasheet.png)
+
+What about other plots?
+
+3A:
+
+!["3A raw datasheet"](./images/3A_2024_datasheet.png)
+
+Wait, do we have *any* 2024 data for the plots in question??
+
+```{r stump-dbh-2, echo=FALSE}
+
+out2 <- overstory %>% 
+  filter(status == "S" & !is.null(dbh) & date > as.POSIXct("2024-01-01 00:00:00")) %>%
+  select(id) %>% 
+  arrange(id) %>% 
+  unique() %>%
+  filter(id %in% reconstruction_plots)
+
+out2 %>% 
+  kbl() %>%
+  kable_paper() %>%
+  row_spec(which(out2$t_idxn == "PRE_1" | out2$t_idxn == "PRE_2"), background = "#C7F9FF7F") %>% 
+  scroll_box(width = "100%", height = "800px") 
+
+```
+
+
+
+Okay, just two plots of the original 15. We can look at those, at least. And for the others, we can look at total tree counts and see if they are way off:
+
+# TODO do this comparison quadrant by quadrant count, not by total site visit count. Need to see if there is a specific quadrant where data is missing. Remember, the "reconstruction" data is missing specific coordinates, so the best we can do is to check the quadrant by quadrant counts. if everything is okay, we should see similar counts in pre- and post- data when we look at large trees/stumps specifically--these were probably unaffected by any treatment or fire (or if they were affected, they were at least recorded as stumps in the "reconstruction" visit). 
+
+
+```{r reconstruction_quadrants}
+overstory_r <- read_csv("overstory_tidy_reconstruction.csv")
+nrow(overstory)
+nrow(overstory_r)
+glimpse(overstory_r)
+which_visit <- overstory_r %>% 
+  filter(id %in% reconstruction_plots,
+         date >= as.POSIXct("2024-01-01")) %>%
+  group_by(id, t_idxn) %>% 
+  summarise(ntrees = n(), .groups = "keep") %>%
+  ungroup() %>% 
+  select(id, which_visit = t_idxn) %>% arrange(id)
+  
+overstory_r %>% 
+  filter(species != "POTR5") %>% 
+  filter(id %in% reconstruction_plots) %>%
+  group_by(id, t_idxn, status) %>%
+  summarise(ntrees = n(), .groups = "keep") %>%
+  ungroup() %>%
+  pivot_wider(names_from = c(t_idxn, status), values_from = ntrees) %>%
+  rowwise %>%
+  mutate(mean = mean(c_across(starts_with("P")), na.rm = TRUE),
+         sd = sd(c_across(starts_with("P")), na.rm = TRUE),
+         coef_variation = ifelse(mean == 0, NA, sd / mean)) %>%
+  select(id, starts_with("PRE"), starts_with("POST_"), starts_with("POSTRX"),
+         mean, coef_variation) %>%
+  arrange(desc(coef_variation)) %>% 
+  ungroup %>% 
+  filter(id %in% reconstruction_plots) %>% 
+  mutate(notes = case_when(
+    id %in% high_aspen ~ ">30% aspen",
+    .default = ""
+  )) %>% 
+  left_join(which_visit) %>% 
+  kbl() %>%
+  kable_paper() %>%
+  scroll_box(width = "100%", height = "800px") 
+
+overstory_r %>% 
+  filter(id %in% reconstruction_plots) %>%
+  group_by(id, t_idxn) %>% 
+  summarize(n = n(), date = first(date))
+
+```
+
+
+Now, we'll do the summary comparing the tree counts by quadrant. 
+````{r by_quadrant}
+# overstory_r: one tree per row. Need to put these into quadrants for counting
+overstory_rq <- overstory_r %>% 
+  mutate(quadrant = case_when(
+    midline_dist_notes %in% c("NE", "SE", "SW", "NW") ~ midline_dist_notes, 
+    x >= 90 & y >= 45 ~ "NE",
+    x >= 90 & y < 45 ~ "SE",
+    x < 90 & y < 45 ~ "SW",
+    x < 90 & y >= 45 ~ "NW",
+    # only two here and they are NA for x. just giving them a random quadrant. 
+    .default = "NW" 
+  )) 
+
+overstory_rq %>% 
+  filter(species != "POTR5") %>% 
+  filter(id %in% reconstruction_plots) %>%
+  group_by(id, t_idxn, quadrant) %>%
+  summarise(ntrees = n(), .groups = "keep") %>%
+  ungroup() %>%
+  pivot_wider(names_from = c(t_idxn, quadrant), values_from = ntrees) %>% 
+  rowwise %>%
+  mutate(mean = mean(c_across(starts_with("P")), na.rm = TRUE),
+         sd = sd(c_across(starts_with("P")), na.rm = TRUE),
+         coef_variation = ifelse(mean == 0, NA, sd / mean)) %>%
+  select(id, starts_with("PRE"), starts_with("POST_"), starts_with("POSTRX"),
+         mean, coef_variation) %>%
+  arrange(desc(coef_variation)) %>% 
+  ungroup %>% 
+  filter(id %in% reconstruction_plots) %>% 
+  mutate(notes = case_when(
+    id %in% high_aspen ~ ">30% aspen",
+    .default = ""
+  )) %>% 
+  left_join(which_visit) %>% View
+# check manually
+
+````
+
+
+
+
+```{r stump_plotL9}
+
+# filter data 
+data <- overstory %>%
+  filter(id == "L9") #%>% 
+
+data %>% 
+  kbl() %>%
+  kable_paper() %>%
+  # row_spec(which(out2$t_idxn == "PRE_1" | out2$t_idxn == "PRE_2"), background = "#C7F9FF7F") %>% 
+  scroll_box(width = "100%", height = "800px") 
+
+# create the plot
+ggplot(data, aes(x = x, y = y, fill = t_idxn, size = dbh, shape = stump)) +
+  geom_point(alpha = 0.5) +
+  labs(title = paste("Plot L9"),
+       x = "Midline distance",
+       y = "N/S distance") +
+  theme_minimal() +
+  coord_cartesian(xlim = c(-2, 166), ylim = c(-84, 84)) + 
+  scale_shape_manual(values = c(22, 21)) +
+  guides(fill=guide_legend(override.aes=list(shape=21))) 
+
+```
+
+
+# THE END
+
+draft stuff below
+
+
+
+
+
+```{r stump_plot3A}
+
+# filter data 
+data <- overstory %>%
+  filter(id == "3A") %>% 
+  mutate(stump = case_when(
+    status == "S" ~ "Stump", 
+    .default = "Tree"
+  ))
+
+# create the plot
+ggplot(data, aes(x = x, y = y, fill = t_idxn, size = dbh, shape = stump)) +
+  geom_point(alpha = 0.5) +
+  labs(title = paste("Plot 3A"),
+       x = "Midline distance",
+       y = "N/S distance") +
+  theme_minimal() +
+  coord_cartesian(xlim = c(-2, 166), ylim = c(-84, 84)) + 
+  scale_shape_manual(values = c(22, 21)) +
+  guides(fill=guide_legend(override.aes=list(shape=21))) 
+
+```
+
+meeting notes
+
+last meeting:
+⦁	reviewed some plot id's and discussed whether they were unique. Wrote modified overstory.R script to correct specific id values.
+⦁	reviewed DBH thresholds and...decided on a dbh cutoff of 8? Did we actually do that? I have an implementation of that but haven't put it into the "main" script. 
+⦁	examined possibility of aspen regeneration effects on tree counts. Any todo on this one? NOTHING TO DO YET
+⦁	next task was to examine stump data and use it to 'reconstruct' plots where possible.
+
+work completed today:
+⦁	updated Plot Mapper shiny app and main Rmd file to use data with corrected IDs
+
+work still in progress:
+⦁	fully implement DBH cutoff? YES DO THAT
+⦁	implement fix for half/partial plots?
+
+Focus on 2024 stump data in plots marked Reconstruction
+plots should focus on "CFLRP" stumps, highlighting whether these stumps have matching trees in the PRE visit
+
+
+this meeting:
+⦁	where we have stump data
+⦁		Remind me which stump data I should be looking at
+⦁	some plots to make sense of it (???)
+⦁		I think we probably need a better visualization, maybe interactive shiny app 
+
+
 
 
 ## Overview plots 

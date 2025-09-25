@@ -5,7 +5,35 @@ library(magrittr)
 library(viridis)
 library(crayon)
 library(readxl)
-d <- read_excel("raw/RA_data_Master_202500619.xlsx", sheet = "Overstory") %>%
+
+# RECONSTRUCTION FLAG ####
+
+# some "plot reconstruction" data was collected in 2024 in order to assess
+# completeness/accuracy of potentially incomplete PRE_ plots. this additional
+# 2024 data was collected without recording precise tree/stump locations.
+# Typically, this data would be discarded, but for specific purpose of "plot
+# reconstruction" it should be kept. set reconstruction <- TRUE to include this
+# data.
+
+reconstruction <- TRUE
+if (reconstruction) {
+  cat("Reconstruction flag set to", bold(underline(green(reconstruction))))
+} else {
+  cat("Reconstruction flag set to", bold(underline(red(reconstruction))))
+}
+
+# list of plots with reconstruction data (these are the ones that need special
+# handling):
+reconstruction_plots <- c(
+  "L12", "L27", "L7", "L9", "RA178", "RA281", "9A", "9B", "9D", "3A", "RA2540",
+  "RA1110", "RA1410", "RA610", "RA2010"
+)
+
+# read in raw data ####
+d <- read_excel("raw/RA_data_Master_202500619.xlsx",
+                sheet = "Overstory",
+                guess_max = 10000
+                ) %>%
   # tidy names
   set_names(c("date", "t_idx", "id", "plot_type", "midline_dist", "s_dist",
               "n_dist", "species", "status", "damage1", "damage2", "dbh",
@@ -72,13 +100,14 @@ treemap <- function(data) {
     # drop unneeded columns
     select(date, id, t_idx, midline_dist, s_dist, n_dist, dbh) %>%
     mutate(# convert n_dist to -s_dist, merge s_dist and n_dist
-      y = case_when(!is.na(s_dist) ~ s_dist,
-                    is.na(s_dist) ~ -n_dist),
-      x = midline_dist,
+      y = case_when(!is.na(as.numeric(s_dist)) ~ as.numeric(s_dist),
+                    is.na(as.numeric(s_dist)) ~ -as.numeric(n_dist)),
+      x = as.numeric(midline_dist),
       # clean up t_idx
       t_idx = case_when(t_idx %in% c("PRE", "PRE?") ~ "PRE",
                         t_idx == "POSTRX" ~ "POST",
-                        t_idx == "POST" ~ "POST")) %>%
+                        t_idx == "POST" ~ "POST")
+    ) %>%
     ggplot(aes(x = x, y = y, color = t_idx, fill = date, size = dbh)) +
     geom_point(pch = 21, stroke = 1) +
     theme_minimal()
@@ -220,7 +249,16 @@ d %>% filter(is.na(plot_type)) %>% group_by(id, date) %>%
 # not sure how to fix this or whether it matters
 
 # check midline_dist ####
-hist(d$midline_dist, breaks = 50) # some issues here
+hist(as.numeric(d$midline_dist), breaks = 50) # some issues here
+# some non_numeric values as well
+d %>% filter(is.na(as.numeric(midline_dist))) %>% pull(midline_dist) %>% unique
+if (reconstruction) {
+  # save these values
+  d %<>% mutate(midline_dist_notes = case_when(
+    is.na(as.numeric(midline_dist)) ~ midline_dist,
+    .default = NA
+  ))
+}
 d %>% arrange(desc(midline_dist)) %>% filter(midline_dist > 164)
 d %>% arrange(midline_dist)
 d %>% filter(is.na(midline_dist))
@@ -232,12 +270,16 @@ d %>% filter(midline_dist < 0 | midline_dist > 160 | is.na(midline_dist)) %>%
   arrange(desc(count))
 
 # check s_dist ####
-hist(d$s_dist, breaks = 50) # some issues here
+hist(as.numeric(d$s_dist), breaks = 50) # some issues here
+# no consequential non-numeric values
+d %>% filter(is.na(as.numeric(s_dist))) %>% pull(s_dist) %>% unique
 d %>% arrange(desc(s_dist)) %>% filter(s_dist > 82)
 d %>% arrange(s_dist)
 
 # check n_dist ####
-hist(d$n_dist, breaks = 50) # some issues here
+hist(as.numeric(d$n_dist), breaks = 50) # some issues here
+# no consequential non-numeric values
+d %>% filter(is.na(as.numeric(n_dist))) %>% pull(n_dist) %>% unique
 d %>% arrange(desc(n_dist)) %>% filter(n_dist > 82)
 d %>% arrange(n_dist)
 
@@ -245,30 +287,73 @@ d %>% arrange(n_dist)
 d %>% filter(!is.na(s_dist) & !is.na(n_dist)) # should be 0
 d %>% filter(is.na(s_dist) & is.na(n_dist)) # should be 0, 19 found
 
+
+d %>%
+  filter(id %in% reconstruction_plots,
+         date >= as.POSIXct("2024-01-01")) %>%
+  View()
+
 # correct coordinate errors ####
-# after discussion with Marin:
-d %<>% mutate(
-  midline_dist = case_when(
-    # exclude plots that have midline_dist just over 164 or NA
-    # for one plot that's WAY over 160, assume missing decimal
-    midline_dist > 400 ~ midline_dist / 10,
-    .default = midline_dist),
-    s_dist = case_when(
-      # when both s_dist and n_dist are NA, set s_dist to 0
-      is.na(s_dist) & is.na(n_dist) ~ 0,
-      # assume a few extremely large values are instances of missing decimal
-      s_dist > 5000 ~ s_dist / 100,
-      s_dist > 100 & s_dist <= 5000 ~ s_dist / 10,
-      .default = s_dist),
-    n_dist = case_when(
-      # assume a few extremely large values are instances of missing decimal
-      n_dist > 100 & n_dist <= 5000 ~ n_dist / 10,
-      .default = n_dist)
+if (reconstruction) {
+  # modified fix that doesn't discard any rows from reconstruction plots
+  d %<>% mutate(
+    midline_dist = as.numeric(midline_dist),
+    s_dist = as.numeric(s_dist),
+    n_dist = as.numeric(n_dist)
   ) %>%
-  # exclude when any coordinate is slightly over the limit
-  filter(midline_dist <= 160,
-         s_dist <= 82 | is.na(s_dist),
-         n_dist <= 82 | is.na(n_dist))
+    mutate(
+      midline_dist = case_when(
+        # exclude plots that have midline_dist just over 164 or NA
+        # for one plot that's WAY over 160, assume missing decimal
+        midline_dist > 400 ~ midline_dist / 10,
+        .default = midline_dist),
+      s_dist = case_when(
+        # when both s_dist and n_dist are NA, set s_dist to 0
+        is.na(s_dist) & is.na(n_dist) ~ 0,
+        # assume a few extremely large values are instances of missing decimal
+        s_dist > 5000 ~ s_dist / 100,
+        s_dist > 100 & s_dist <= 5000 ~ s_dist / 10,
+        .default = s_dist),
+      n_dist = case_when(
+        # assume a few extremely large values are instances of missing decimal
+        n_dist > 100 & n_dist <= 5000 ~ n_dist / 10,
+        .default = n_dist)
+    ) %>%
+    # exclude when any coordinate is slightly over the limit NOT INCLUDING
+    # reconstruction plots
+    filter(id %in% reconstruction_plots | midline_dist <= 160,
+           id %in% reconstruction_plots | (s_dist <= 82 | is.na(s_dist)),
+           id %in% reconstruction_plots | (n_dist <= 82 | is.na(n_dist)))
+} else {
+  # after discussion with Marin:
+  d %<>% mutate(
+    midline_dist = as.numeric(midline_dist),
+    s_dist = as.numeric(s_dist),
+    n_dist = as.numeric(n_dist)
+  ) %>%
+    mutate(
+      midline_dist = case_when(
+        # exclude plots that have midline_dist just over 164 or NA
+        # for one plot that's WAY over 160, assume missing decimal
+        midline_dist > 400 ~ midline_dist / 10,
+        .default = midline_dist),
+      s_dist = case_when(
+        # when both s_dist and n_dist are NA, set s_dist to 0
+        is.na(s_dist) & is.na(n_dist) ~ 0,
+        # assume a few extremely large values are instances of missing decimal
+        s_dist > 5000 ~ s_dist / 100,
+        s_dist > 100 & s_dist <= 5000 ~ s_dist / 10,
+        .default = s_dist),
+      n_dist = case_when(
+        # assume a few extremely large values are instances of missing decimal
+        n_dist > 100 & n_dist <= 5000 ~ n_dist / 10,
+        .default = n_dist)
+    ) %>%
+    # exclude when any coordinate is slightly over the limit
+    filter(midline_dist <= 160,
+           s_dist <= 82 | is.na(s_dist),
+           n_dist <= 82 | is.na(n_dist))
+}
 
 # check species ####
 d %>% filter(is.na(species)) # no NA, this is good
@@ -324,6 +409,18 @@ d %>% arrange(dbh)
 # leaving all this alone, though 121 dbh aspen is pretty much impossible.
 # Perhaps wrong unit or missing decimals for some of these?
 
+## fix dbh cutoff ####
+# known issue: inconsistent minimum dbh thresholds across plot visits. fix:
+# implement dbh cutoff of 8.
+ifelse(reconstruction,
+       {
+         d %<>% filter(id %in% reconstruction_plots | dbh >= 8)
+       },
+       {
+         d %<>% filter(dbh >= 8)
+       }
+)
+
 # check cbh_class ####
 table(d$cbh_class, useNA = "always") # some cleanup needed here
 d %<>% mutate(
@@ -349,12 +446,17 @@ d %<>% mutate(
 d_tidy <- d %>%
   # drop unneeded columns
   select(id, t_idx, date = date_corrected, midline_dist, s_dist, n_dist,
-         species, dbh, standing_class, status) %>%
+         species, dbh, standing_class, status, midline_dist_notes) %>%
   mutate(# convert n_dist to -s_dist, merge s_dist and n_dist
     y = case_when(!is.na(s_dist) ~ s_dist,
                   is.na(s_dist) ~ -n_dist),
     x = midline_dist) %>%
   select(-s_dist, -n_dist)
+
+if (!reconstruction) {
+  # drop the midline_dist_notes col
+  d_tidy %<>% select(-midline_dist_notes)
+}
 
 # make new t_idx to distinguish multiple pre- and post-treatment visits
 temporal_index <- d_tidy %>%
@@ -370,8 +472,33 @@ d_tidy %<>%
   relocate(id, t_idx, t_idxn, date, x, y, species, dbh, standing_class, status)
 
 d_tidy
+
+
+# check t_idxn sequence ####
+
+# plots should not revert from "post" -> "pre" or "postrx" -> "post" status.
+# Once a plot visit is recorded as postrx, all subsequent plots should also be
+# postrx (and so on).
+
+# inspect to ensure datetimes are increasing from L to R across rows:
+d_tidy %>%
+  group_by(id, t_idxn) %>%
+  summarize(date = first(date)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = t_idxn, values_from = date) %>%
+  select(id, PRE_1, PRE_2, POST_1, POST_2, POST_3, POSTRX_1, POSTRX_2) %>%
+  View()
+
+
+
+
+
 # export
-write_csv(d_tidy, "overstory_tidy.csv")
+if (reconstruction) {
+  write_csv(d_tidy, "overstory_tidy_reconstruction.csv")
+} else {
+  write_csv(d_tidy, "overstory_tidy.csv")
+}
 
 # ntrees data
 ntrees <- d_tidy %>%
@@ -388,4 +515,8 @@ ntrees <- d_tidy %>%
   arrange(desc(coef_variation))
 
 # write out ####
-write_csv(ntrees, "ntrees.csv")
+if (reconstruction) {
+  write_csv(ntrees, "ntrees_reconstruction.csv")
+} else {
+  write_csv(ntrees, "ntrees.csv")
+}
