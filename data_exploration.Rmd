@@ -457,10 +457,11 @@ which_visit <- overstory_r %>%
   summarise(ntrees = n(), .groups = "keep") %>%
   ungroup() %>% 
   select(id, which_visit = t_idxn) %>% arrange(id)
-  
+
 overstory_r %>% 
   filter(species != "POTR5") %>% 
-  filter(id %in% reconstruction_plots) %>%
+  filter(id %in% reconstruction_plots) %>% 
+  # filter(status != "S") %>% 
   group_by(id, t_idxn, status) %>%
   summarise(ntrees = n(), .groups = "keep") %>%
   ungroup() %>%
@@ -478,7 +479,7 @@ overstory_r %>%
     id %in% high_aspen ~ ">30% aspen",
     .default = ""
   )) %>% 
-  left_join(which_visit) %>% 
+  left_join(which_visit) %>% View
   kbl() %>%
   kable_paper() %>%
   scroll_box(width = "100%", height = "800px") 
@@ -497,21 +498,69 @@ Now, we'll do the summary comparing the tree counts by quadrant.
 overstory_rq <- overstory_r %>% 
   mutate(quadrant = case_when(
     midline_dist_notes %in% c("NE", "SE", "SW", "NW") ~ midline_dist_notes, 
-    x >= 90 & y >= 45 ~ "NE",
-    x >= 90 & y < 45 ~ "SE",
-    x < 90 & y < 45 ~ "SW",
-    x < 90 & y >= 45 ~ "NW",
+    x >= 82 & y >= 0 ~ "NE",
+    x >= 82 & y < 0 ~ "SE",
+    x < 82 & y < 0 ~ "SW",
+    x < 82 & y >= 0 ~ "NW",
     # only two here and they are NA for x. just giving them a random quadrant. 
-    .default = "NW" 
-  )) 
+    .default = "NE" 
+  )) %>% 
+  # only want to keep "reconstruction" plots
+  filter(id %in% reconstruction_plots) %>% 
+  # only want to keep trees from "reconstruction" visits and "PRE_1" visits
+  # EXCEPT 3 plots where POST_1 is the "pre" visit in question RA1410, 9A, 9B
+  mutate(visit = case_when(
+    (id %in% c("RA1410", "9A", "9B") & t_idxn == "POST_1") ~ "pre", 
+    t_idxn == "PRE_1" ~ "pre", 
+    .default = "post"
+  )) %>% 
+  # filter to remove non-reconstruction post-treatment data, leaving only the
+  # relevant "pre" and "post" visits
+  # NOTE L9, RA2010 post does not have midline_dist_notes, locations recorded
+  # with xy. must have special filter for those to get the right "post" plot. 
+  filter(
+    !is.na(midline_dist_notes) |
+      visit == "pre" |
+      (id == "L9" & t_idxn == "POST_2") |
+      (id == "RA2010" & t_idxn == "POSTRX_1")
+  ) #%>%
+  # filter(!(visit == "post" & status == "S"))
+View(overstory_rq)
+
+overstory_rq %>% filter(id == "3A") %>% filter(t_idx == "PRE") %>% View
+
 
 overstory_rq %>% 
-  filter(species != "POTR5") %>% 
-  filter(id %in% reconstruction_plots) %>%
-  group_by(id, t_idxn, quadrant) %>%
-  summarise(ntrees = n(), .groups = "keep") %>%
-  ungroup() %>%
-  pivot_wider(names_from = c(t_idxn, quadrant), values_from = ntrees) %>% 
+  # should aspen be filtered out?
+  # filter(species != "POTR5") %>%
+  # should stumps be filtered from post-treatment visits?
+  # filter(!(visit == "post" & status == "S")) %>% 
+  # should stumps be filtered from pre-treatment visits?
+  # filter(!(visit == "pre" & status == "S")) %>% 
+  # should anything but live trees be filtered?
+  filter(status == "L") %>% 
+  group_by(id, visit, quadrant) %>%
+  summarise(ntrees = n(), .groups = "keep") %>% 
+  ungroup() %>% 
+  # select(-t_idxn) %>% 
+  pivot_wider(names_from = c(visit, quadrant), values_from = ntrees) %>% 
+  # pre/post ratio by quadrat
+  mutate(
+    ratio_NE = pre_NE/post_NE, 
+    ratio_NW = pre_NW/post_NW, 
+    ratio_SE = pre_SE/post_SE, 
+    ratio_SW = pre_SW/post_SW, 
+  ) %>% 
+  rowwise() %>%
+  mutate(
+    sum_pre = pre_NE+pre_NW+pre_SE+pre_SW,
+    sum_post = post_NE+post_NW+post_SE+post_SW,
+    ratio = sum_pre/sum_post
+    ) %>% 
+  arrange(ratio) %>% 
+  View()
+  
+  
   rowwise %>%
   mutate(mean = mean(c_across(starts_with("P")), na.rm = TRUE),
          sd = sd(c_across(starts_with("P")), na.rm = TRUE),

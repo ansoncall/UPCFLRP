@@ -15,7 +15,7 @@ library(readxl)
 # reconstruction" it should be kept. set reconstruction <- TRUE to include this
 # data.
 
-reconstruction <- TRUE
+reconstruction <- FALSE
 if (reconstruction) {
   cat("Reconstruction flag set to", bold(underline(green(reconstruction))))
 } else {
@@ -241,6 +241,17 @@ d %<>%
   mutate(t_idx = case_when(t_idx == "PRE?" ~ "PRE",
                            .default = t_idx))
 
+# fix incorrectly recorded pre/post values for select plots
+d %<>%
+  mutate(
+    t_idx = case_when(
+      (id == "RA1410" & date == as_date("6/21/2016", format = "%m/%d/%Y")) ~ "PRE",
+      (id == "9A" & date == as_date("6/23/2015", format = "%m/%d/%Y")) ~ "PRE",
+      (id == "9B" & date == as_date("6/23/2015", format = "%m/%d/%Y")) ~ "PRE",
+      .default = t_idx
+      )
+    )
+
 # check plot_type ####
 unique(d$plot_type) # some NA
 d %>% filter(is.na(plot_type)) %>% group_by(id, date) %>%
@@ -446,17 +457,17 @@ d %<>% mutate(
 d_tidy <- d %>%
   # drop unneeded columns
   select(id, t_idx, date = date_corrected, midline_dist, s_dist, n_dist,
-         species, dbh, standing_class, status, midline_dist_notes) %>%
+         species, dbh, standing_class, status) %>% # midline_dist_notes if reconstruction
   mutate(# convert n_dist to -s_dist, merge s_dist and n_dist
     y = case_when(!is.na(s_dist) ~ s_dist,
                   is.na(s_dist) ~ -n_dist),
     x = midline_dist) %>%
   select(-s_dist, -n_dist)
 
-if (!reconstruction) {
-  # drop the midline_dist_notes col
-  d_tidy %<>% select(-midline_dist_notes)
-}
+# if (!reconstruction) {
+#   # drop the midline_dist_notes col
+#   d_tidy %<>% select(-midline_dist_notes)
+# }
 
 # make new t_idx to distinguish multiple pre- and post-treatment visits
 temporal_index <- d_tidy %>%
@@ -500,8 +511,10 @@ if (reconstruction) {
   write_csv(d_tidy, "overstory_tidy.csv")
 }
 
+
 # ntrees data
 ntrees <- d_tidy %>%
+  filter(status == "L") %>%
   group_by(id, t_idxn) %>%
   summarise(ntrees = n(), .groups = "keep") %>%
   ungroup() %>%
@@ -512,11 +525,11 @@ ntrees <- d_tidy %>%
          coef_variation = ifelse(mean == 0, NA, sd / mean)) %>%
   select(id, starts_with("PRE"), starts_with("POST_"), starts_with("POSTRX"),
          mean, coef_variation) %>%
-  arrange(desc(coef_variation))
-
+  arrange(id)
+ntrees %>% View
 # write out ####
 if (reconstruction) {
   write_csv(ntrees, "ntrees_reconstruction.csv")
 } else {
-  write_csv(ntrees, "ntrees.csv")
+  write_csv(ntrees, "ntrees_liveonly.csv")
 }
