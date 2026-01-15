@@ -2,3 +2,7 @@
 .Rprofile
 *.csv
 *.lock
+images/
+rsconnect/
+*.xlsx
+*.html
