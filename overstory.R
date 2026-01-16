@@ -205,8 +205,9 @@ treemap(d %>%
                  dbh = as.numeric(dbh)))
 
 
-d %>% filter(id == "L29") %>%
-  arrange(as.numeric(dbh)) %>% View
+# After discussion with Marin and Maggie, all 2013 pre data should be removed if
+# there is a later 2015 pre visit.
+d %<>% filter(!(id %in% two_visit_sites & date < as.Date("2014-01-01")))
 
 
 foo <- d %>%
@@ -417,8 +418,11 @@ d %<>% mutate(dbh = as.numeric(dbh)) %>% filter(!is.na(dbh))
 hist(d$dbh, breaks = 50) # some issues here
 d %>% arrange(desc(dbh)) %>% filter(dbh > 50)
 d %>% arrange(dbh)
-# leaving all this alone, though 121 dbh aspen is pretty much impossible.
-# Perhaps wrong unit or missing decimals for some of these?
+# anything over 50 dbh we will divide by 10, assuming a decimal was missed.
+d %<>% mutate(dbh = case_when(
+  dbh >= 50 ~ dbh/10,
+  .default = dbh
+))
 
 ## fix dbh cutoff ####
 # known issue: inconsistent minimum dbh thresholds across plot visits. fix:
@@ -497,11 +501,37 @@ d_tidy %>%
   summarize(date = first(date)) %>%
   ungroup() %>%
   pivot_wider(names_from = t_idxn, values_from = date) %>%
-  select(id, PRE_1, PRE_2, POST_1, POST_2, POST_3, POSTRX_1, POSTRX_2) %>%
+  select(id, PRE_1, POST_1, POST_2, POST_3, POSTRX_1, POSTRX_2) %>%
   View()
 
+# turn sequences in to "years post-treatment"
+sequences <- d_tidy %>%
+  group_by(id, t_idxn) %>%
+  summarize(date = first(date)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = t_idxn, values_from = date) %>%
+  select(id, PRE_1, POST_1, POST_2, POST_3, POSTRX_1, POSTRX_2) %>%
+  mutate(trt_year =
+                       case_when(
+                         !is.na(POST_1) ~ year(POST_1) - 1,
+                         is.na(POST_1) ~ year(POSTRX_1) - 1,
+                         .default = NA_integer_
+                       )
+                     )
 
+View(sequences)
 
+d_tidy %<>% left_join(sequences, by = join_by(id == id)) %>%
+  mutate(visit_age = case_when(
+    t_idxn == "PRE_1" ~ -1,
+    t_idxn == "POST_1" ~ 1,
+    t_idxn == "POST_2" ~ year(POST_2) - trt_year,
+    t_idxn == "POST_3" ~ year(POST_3) - trt_year,
+    t_idxn == "POSTRX_1" ~ year(POSTRX_1) - trt_year,
+    t_idxn == "POSTRX_2" ~ year(POSTRX_2) - trt_year,
+    .default = 999
+  )) %>%
+  select(-(PRE_1:POSTRX_2))
 
 
 # export
