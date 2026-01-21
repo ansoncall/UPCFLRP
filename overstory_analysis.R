@@ -155,7 +155,7 @@ by_visit_and_trt_mech <- ggarrange(a, b, c,
                               ncol = 3,
                               legend = "right",
                               common.legend = TRUE) +
-  annotate("text", x = 1/7, y = 0.95, label = "Mechanical, n=22", size =3, hjust = 0)
+  annotate("text", x = 1/7, y = 0.95, label = "a) Mechanical (n=22)", size =3, hjust = 0)
 
 ### rx burn ####
 a <- ggplot(df2 %>% filter(trt_type == "Prescribed burn"),
@@ -206,9 +206,9 @@ by_visit_and_trt_rx <- ggarrange(a, b, c,
                                    ncol = 3,
                                    legend = "right",
                                    common.legend = TRUE) +
-  annotate("text", x = 1/7, y = 0.95, label = "Prescribed burn, n=12", size = 3, hjust = 0)
+  annotate("text", x = 1/7, y = 0.95, label = "b) Prescribed burn (n=12)", size = 3, hjust = 0)
 ggarrange(by_visit_and_trt_mech, by_visit_and_trt_rx, nrow = 2)
-ggsave("stats_by_trt_type.png", width = 7.5, height = 5, units = "in", dpi = 600)
+ggsave("stats_by_trt_type.png", width = 7.5, height = 5, units = "in", dpi = 600, bg = "white")
 
 ## by visit * forest_type ####
 df3 <- plot_df %>%
@@ -260,7 +260,7 @@ by_visit_and_forest_dry <- ggarrange(a, b, c,
                                  ncol = 3,
                                  legend = "right",
                                  common.legend = TRUE) +
-  annotate("text", x = 1/7, y = 0.95, label = "Dry mixed conifer, n=16", size = 3, hjust = 0, bg = "white")
+  annotate("text", x = 1/8, y = 0.92, label = "a) Dry mixed conifer (n=16)", size = 2.8, hjust = 0, bg = "white")
 
 ### mesic ####
 a <- ggplot(df3 %>% filter(forest_type == "Mesic mixed conifer"),
@@ -300,7 +300,7 @@ by_visit_and_forest_mesic <- ggarrange(a, b, c,
                                      ncol = 3,
                                      legend = "right",
                                      common.legend = TRUE) +
-  annotate("text", x = 1/8, y = 0.95, label = "Mesic mixed conifer, n=18", size = 3, hjust = 0)
+  annotate("text", x = 1/8, y = 0.92, label = "b) Mesic mixed conifer (n=18)", size = 2.8, hjust = 0)
 
 ggarrange(by_visit_and_forest_dry, by_visit_and_forest_mesic, nrow = 2)
 ggsave("stats_by_forest_type.png", width = 7.5, height = 5, units = "in", dpi = 600, bg = "white")
@@ -365,7 +365,7 @@ a <- ggplot(df5 %>% filter(trt_type == "Mechanical"),
   labs(x = NULL, y = exp) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic() +
-  annotate("text", x = 1, y = 38, hjust = 0, label = "Mechanical,\nn=22", size = 4)
+  annotate("text", x = 4, y = 38, hjust = 0, label = "a) Mechanical (n=22)", size = 4)
 
 b <- ggplot(df5 %>% filter(trt_type == "Mechanical"), aes(x = species, y = mean_ba_ac, fill = Visit)) +
   geom_col(position = position_dodge()) +
@@ -376,9 +376,9 @@ b <- ggplot(df5 %>% filter(trt_type == "Mechanical"), aes(x = species, y = mean_
   labs(x = NULL, y = exp) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic() +
-  annotate("text", x = 1, y = 38, hjust = 0, label = "Prescribed burn,\nn=12", size = 4)
+  annotate("text", x = 4, y = 38, hjust = 0, label = "b) Prescribed burn (n=12)", size = 4)
 ggarrange(a, b, nrow = 2)
-ggsave("spec_by_trt.png", width = 7, heigh = 5, units = "in", dpi = 600)
+ggsave("spec_by_trt.png", width = 7, heigh = 5, units = "in", dpi = 600, bg = "white")
 ## by visit * forest_type ####
 df6 <- spec_df %>%
   group_by(Visit, species, forest_type) %>%
@@ -401,7 +401,7 @@ c <- ggplot(df6 %>% filter(forest_type == "Dry mixed conifer"),
   labs(x = NULL, y = exp) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic() +
-  annotate("text", x = 0.5, y = 60, hjust = 0, label = "Dry mixed conifer,\nn=16", size = 4)
+  annotate("text", x = 4, y = 60, hjust = 0, label = "a) Dry mixed conifer (n=16)", size = 4)
 
 d <- ggplot(df6 %>% filter(forest_type == "Mesic mixed conifer"),
             aes(x = species, y = mean_ba_ac, fill = Visit)) +
@@ -413,10 +413,10 @@ d <- ggplot(df6 %>% filter(forest_type == "Mesic mixed conifer"),
   labs(x = NULL, y = exp) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic()+
-  annotate("text", x = 0.5, y = 40, hjust = 0, label = "Mesic mixed conifer,\nn=18", size = 4)
+  annotate("text", x = 4, y = 40, hjust = 0, label = "b) Mesic mixed conifer (n=18)", size = 4)
 
 ggarrange(c, d, nrow = 2)
-ggsave("spec_by_forest.png", width = 7, heigh = 5, units = "in", dpi = 600)
+ggsave("spec_by_forest.png", width = 7, heigh = 5, units = "in", dpi = 600, bg = "white")
 
 # output ####
 ## statistics ####
