@@ -6,8 +6,18 @@ library(ggpubr)
 
 # load data ####
 # tidy tree-by-tree data, all statuses included
-alltrees <- read_csv("overstory_tidy.csv")
+alltrees <- read_csv("overstory_tidy.csv") %>%
+  # remove gambel oak
+  filter(species != "QUGA") %>%
+  # fix two remaining weird values, rename POTR5 to POTR
+  mutate(species = case_when(
+    species == "PS,E" ~ "PSME",
+    species == "UNID" ~ "UNK",
+    species == "POTR5" ~ "POTR",
+    .default = species
+    ))
 glimpse(alltrees)
+
 # info on which plots to use and how to categorize them
 plotinfo <- readxl::read_excel(
   "raw/Final_tree_data_analysis_plots_to_use.xlsx"
@@ -17,46 +27,29 @@ plotinfo <- readxl::read_excel(
   # "RA 191" has odd spacing and is duplicate anyway
   filter(grepl("L|R", id), !is.na(trt_type), id != "RA 191") %>%
   # fix capitalization in trt_type
-  mutate(trt_type = case_when(trt_type == "RX" ~ "Rx",
-                              trt_type == "mechanical" ~ "Mechanical",
-                              .default = trt_type))
+  mutate(trt_type = case_when(
+    trt_type == "RX" | trt_type == "Rx" ~ "Prescribed burn",
+    trt_type == "mechanical" ~ "Mechanical",
+    .default = trt_type
+  ))
+
 # info on forest types for each plot
 typeinfo <- readxl::read_excel("raw/RA_visits_summary_allyears.xlsx") %>%
-  select(id = Plot_name, forest_type = `Dominant forest type`)
+  select(id = Plot_name, forest_type = `Dominant forest type`) %>%
+  # change values for a few key "mixed" sites
+  mutate(forest_type = case_when(
+    id %in% c("RA181", "RA191") ~ "Mesic mixed conifer",
+    id == "RA301" ~ "Dry mixed conifer",
+    .default = forest_type
+  ))
+
 # join info
 info <- left_join(plotinfo, typeinfo, by = "id")
 
 # tidy data ####
 alltrees_tidy <- alltrees %>%
   inner_join(info, by = "id")
-
-
-# BA: compare pre, post1, post5, post10(?) * treatment type in a grouped bar
-# plot. also try * forest type and see what it looks like.
-
-# Calculate basal area
-# Calculate BA for each tree
-
-# from former script: trees$BA_ft2<- pi * (trees$DBH/24)^2.
-# plot size in acres: 162=plot dimensions in ft,  43560=ft^2 in an acres
-
-# TODO check with marin: are we only using live trees and snags, and eliminating
-# some species? See previous code:
-# # Eliminate everything but live trees and snags from dataset
-# trees <- trees[which(trees$Status != "S"),]
-# trees <- trees[which(trees$Status != "X"),]
-# trees <- trees[which(trees$Status != "Y"),]
-#
-# #look at the unique tree species in the dataset
-# unique(trees$Spp)
-#
-# # Remove species which aren't of interest to analysis
-# trees <- trees[which(trees$Spp !="UNK"),]
-# trees <- trees[which(trees$Spp !="QUGA"),]
-
-# also is this qmd calc correct?
-## # Calculate QMD
-## summary$QMD = sqrt((summary$BA_ac/summary$TPA)/0.005454154)
+glimpse(alltrees_tidy)
 
 # std error func
 se <- \(x) sqrt(var(x)/length(x))
@@ -94,34 +87,7 @@ df1 <- plot_df %>%
             se_tpa = se(tpa),
             mean_qmd = mean(qmd),
             se_qmd = se(qmd))
-
-# plots
-exp = expression(paste('Basal Area (ft '^'2'*'ac'^'-1'*')'))
-a <- ggplot(df1, aes(x = Visit, y = mean_ba_ac)) +
-  geom_col(position = position_dodge()) +
-  geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
-                    ymax = mean_ba_ac + se_ba_ac),
-                width = 0) +
-  labs(x = NULL, y = exp) +
-  theme_classic()
-
-b <- ggplot(df1, aes(x = Visit, y = mean_tpa)) +
-  geom_col(position = position_dodge()) +
-  geom_errorbar(aes(ymin = mean_tpa - se_tpa,
-                    ymax = mean_tpa + se_tpa),
-                width = 0) +
-  labs(x = NULL, y = "Trees per Acre") +
-  theme_classic()
-
-c <- ggplot(df1, aes(x = Visit, y = mean_qmd)) +
-  geom_col(position = position_dodge()) +
-  geom_errorbar(aes(ymin = mean_qmd - se_qmd,
-                    ymax = mean_qmd + se_qmd),
-                width = 0) +
-  labs(x = NULL, y = "Quadratic Mean Diameter") +
-  theme_classic()
-
-by_visit <- ggarrange(a, b, c, ncol = 3)
+## no plot for this
 
 ## by visit * trt_type ####
 df2 <- plot_df %>%
@@ -134,40 +100,115 @@ df2 <- plot_df %>%
             se_qmd = se(qmd))
 
 # plots
-a <- ggplot(df2, aes(x = trt_type, y = mean_ba_ac, fill = Visit)) +
-  geom_col(position = position_dodge()) +
+# get count of plots by trt group
+plot_df %>% group_by(trt_type, Visit) %>% summarize(n = n())
+# L7 Post5 data is excluded. Only plot quadrants recorded.
+# just going to put count as 22 for mech.
+### mechanical ####
+
+exp = expression(paste('Basal Area (ft '^'2'*'ac'^'-1'*')'))
+a <- ggplot(df2 %>% filter(trt_type == "Mechanical"),
+            aes(x = Visit, y = mean_ba_ac, fill = Visit)) +
+  geom_col() +
   geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
                     ymax = mean_ba_ac + se_ba_ac),
                 width = 0,
                 position = position_dodge(0.9)) +
-  labs(x = NULL, y = exp) +
+  labs(y = exp) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
-  theme_classic()
+  theme_classic() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
 
-b <- ggplot(df2, aes(x = trt_type, y = mean_tpa, fill = Visit)) +
-  geom_col(position = position_dodge()) +
+
+a
+b <- ggplot(df2 %>% filter(trt_type == "Mechanical"),
+            aes(x = Visit, y = mean_tpa, fill = Visit)) +
+  geom_col() +
   geom_errorbar(aes(ymin = mean_tpa - se_tpa,
                     ymax = mean_tpa + se_tpa),
                 width = 0,
                 position = position_dodge(0.9)) +
   labs(x = NULL, y = "Trees per Acre") +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
-  theme_classic()
-
-c <- ggplot(df2, aes(x = trt_type, y = mean_qmd, fill = Visit)) +
-  geom_col(position = position_dodge()) +
+  theme_classic() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+b
+c <- ggplot(df2 %>% filter(trt_type == "Mechanical"),
+            aes(x = Visit, y = mean_qmd, fill = Visit)) +
+  geom_col() +
   geom_errorbar(aes(ymin = mean_qmd - se_qmd,
                     ymax = mean_qmd + se_qmd),
                 width = 0,
                 position = position_dodge(0.9)) +
-  labs(x = NULL, y = "Quadratic Mean Diameter") +
+  labs(x = NULL, y = "Quadratic Mean Diameter (in)") +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
-  theme_classic()
-
-by_visit_and_trt <- ggarrange(a, b, c,
+  theme_classic() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+c
+by_visit_and_trt_mech <- ggarrange(a, b, c,
                               ncol = 3,
                               legend = "right",
-                              common.legend = TRUE)
+                              common.legend = TRUE) +
+  annotate("text", x = 1/7, y = 0.95, label = "Mechanical, n=22", size =3, hjust = 0)
+
+### rx burn ####
+a <- ggplot(df2 %>% filter(trt_type == "Prescribed burn"),
+            aes(x = Visit, y = mean_ba_ac, fill = Visit)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
+                    ymax = mean_ba_ac + se_ba_ac),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = exp) +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+a
+b <- ggplot(df2 %>% filter(trt_type == "Prescribed burn"),
+            aes(x = Visit, y = mean_tpa, fill = Visit)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_tpa - se_tpa,
+                    ymax = mean_tpa + se_tpa),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = "Trees per Acre") +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+b
+c <- ggplot(df2 %>% filter(trt_type == "Prescribed burn"),
+            aes(x = Visit, y = mean_qmd, fill = Visit)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_qmd - se_qmd,
+                    ymax = mean_qmd + se_qmd),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = "Quadratic Mean Diameter (in)") +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+c
+
+by_visit_and_trt_rx <- ggarrange(a, b, c,
+                                   ncol = 3,
+                                   legend = "right",
+                                   common.legend = TRUE) +
+  annotate("text", x = 1/7, y = 0.95, label = "Prescribed burn, n=12", size = 3, hjust = 0)
+ggarrange(by_visit_and_trt_mech, by_visit_and_trt_rx, nrow = 2)
+ggsave("stats_by_trt_type.png", width = 7.5, height = 5, units = "in", dpi = 600)
 
 ## by visit * forest_type ####
 df3 <- plot_df %>%
@@ -180,8 +221,11 @@ df3 <- plot_df %>%
             se_qmd = se(qmd))
 
 # plots
-a <- ggplot(df3, aes(x = forest_type, y = mean_ba_ac, fill = Visit)) +
-  geom_col(position = position_dodge()) +
+plot_df %>% group_by(forest_type, Visit) %>% summarize(n = n())
+### dry ####
+a <- ggplot(df3 %>% filter(forest_type == "Dry mixed conifer"),
+            aes(x = Visit, y = mean_ba_ac, fill = Visit)) +
+  geom_col() +
   geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
                     ymax = mean_ba_ac + se_ba_ac),
                 width = 0,
@@ -190,8 +234,9 @@ a <- ggplot(df3, aes(x = forest_type, y = mean_ba_ac, fill = Visit)) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic()
 
-b <- ggplot(df3, aes(x = forest_type, y = mean_tpa, fill = Visit)) +
-  geom_col(position = position_dodge()) +
+b <- ggplot(df3 %>% filter(forest_type == "Dry mixed conifer"),
+            aes(x = Visit, y = mean_tpa, fill = Visit)) +
+  geom_col() +
   geom_errorbar(aes(ymin = mean_tpa - se_tpa,
                     ymax = mean_tpa + se_tpa),
                 width = 0,
@@ -200,8 +245,9 @@ b <- ggplot(df3, aes(x = forest_type, y = mean_tpa, fill = Visit)) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic()
 
-c <- ggplot(df3, aes(x = forest_type, y = mean_qmd, fill = Visit)) +
-  geom_col(position = position_dodge()) +
+c <- ggplot(df3 %>% filter(forest_type == "Dry mixed conifer"),
+            aes(x = Visit, y = mean_qmd, fill = Visit)) +
+  geom_col() +
   geom_errorbar(aes(ymin = mean_qmd - se_qmd,
                     ymax = mean_qmd + se_qmd),
                 width = 0,
@@ -210,10 +256,54 @@ c <- ggplot(df3, aes(x = forest_type, y = mean_qmd, fill = Visit)) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic()
 
-by_visit_and_forest <- ggarrange(a, b, c,
+by_visit_and_forest_dry <- ggarrange(a, b, c,
                                  ncol = 3,
                                  legend = "right",
-                                 common.legend = TRUE)
+                                 common.legend = TRUE) +
+  annotate("text", x = 1/7, y = 0.95, label = "Dry mixed conifer, n=16", size = 3, hjust = 0, bg = "white")
+
+### mesic ####
+a <- ggplot(df3 %>% filter(forest_type == "Mesic mixed conifer"),
+            aes(x = Visit, y = mean_ba_ac, fill = Visit)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
+                    ymax = mean_ba_ac + se_ba_ac),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = exp) +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic()
+
+b <- ggplot(df3 %>% filter(forest_type == "Mesic mixed conifer"),
+            aes(x = Visit, y = mean_tpa, fill = Visit)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_tpa - se_tpa,
+                    ymax = mean_tpa + se_tpa),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = "Trees per Acre") +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic()
+
+c <- ggplot(df3 %>% filter(forest_type == "Mesic mixed conifer"),
+            aes(x = Visit, y = mean_qmd, fill = Visit)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = mean_qmd - se_qmd,
+                    ymax = mean_qmd + se_qmd),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = "Quadratic Mean Diameter") +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic()
+
+by_visit_and_forest_mesic <- ggarrange(a, b, c,
+                                     ncol = 3,
+                                     legend = "right",
+                                     common.legend = TRUE) +
+  annotate("text", x = 1/8, y = 0.95, label = "Mesic mixed conifer, n=18", size = 3, hjust = 0)
+
+ggarrange(by_visit_and_forest_dry, by_visit_and_forest_mesic, nrow = 2)
+ggsave("stats_by_forest_type.png", width = 7.5, height = 5, units = "in", dpi = 600, bg = "white")
 
 # by plot * species ####
 # prep data
@@ -252,16 +342,7 @@ df4 <- spec_df %>%
             se_qmd = se(qmd)
   ) %>%
   ungroup()
-
-a <- ggplot(df4, aes(x = species, y = mean_ba_ac, fill = Visit)) +
-  geom_col(position = position_dodge()) +
-  geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
-                    ymax = mean_ba_ac + se_ba_ac),
-                width = 0,
-                position = position_dodge(0.9)) +
-  labs(x = NULL, y = exp) +
-  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
-  theme_classic()
+## no plot for this
 
 ## by visit * trt_type ####
 df5 <- spec_df %>%
@@ -274,8 +355,8 @@ df5 <- spec_df %>%
             se_qmd = se(qmd)
   ) %>%
   ungroup()
-
-b <- ggplot(df5, aes(x = species, y = mean_ba_ac, fill = Visit)) +
+a <- ggplot(df5 %>% filter(trt_type == "Mechanical"),
+            aes(x = species, y = mean_ba_ac, fill = Visit)) +
   geom_col(position = position_dodge()) +
   geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
                     ymax = mean_ba_ac + se_ba_ac),
@@ -284,8 +365,20 @@ b <- ggplot(df5, aes(x = species, y = mean_ba_ac, fill = Visit)) +
   labs(x = NULL, y = exp) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic() +
-  facet_wrap(~trt_type)
+  annotate("text", x = 1, y = 38, hjust = 0, label = "Mechanical,\nn=22", size = 4)
 
+b <- ggplot(df5 %>% filter(trt_type == "Mechanical"), aes(x = species, y = mean_ba_ac, fill = Visit)) +
+  geom_col(position = position_dodge()) +
+  geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
+                    ymax = mean_ba_ac + se_ba_ac),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = exp) +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic() +
+  annotate("text", x = 1, y = 38, hjust = 0, label = "Prescribed burn,\nn=12", size = 4)
+ggarrange(a, b, nrow = 2)
+ggsave("spec_by_trt.png", width = 7, heigh = 5, units = "in", dpi = 600)
 ## by visit * forest_type ####
 df6 <- spec_df %>%
   group_by(Visit, species, forest_type) %>%
@@ -298,8 +391,9 @@ df6 <- spec_df %>%
   ) %>%
   ungroup()
 
-c <- ggplot(df6, aes(x = species, y = mean_ba_ac, fill = Visit)) +
-  geom_col(position = position_dodge()) +
+c <- ggplot(df6 %>% filter(forest_type == "Dry mixed conifer"),
+            aes(x = species, y = mean_ba_ac, fill = Visit)) +
+  geom_col(position = position_dodge(0.9)) +
   geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
                     ymax = mean_ba_ac + se_ba_ac),
                 width = 0,
@@ -307,7 +401,22 @@ c <- ggplot(df6, aes(x = species, y = mean_ba_ac, fill = Visit)) +
   labs(x = NULL, y = exp) +
   scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
   theme_classic() +
-  facet_wrap(~forest_type)
+  annotate("text", x = 0.5, y = 60, hjust = 0, label = "Dry mixed conifer,\nn=16", size = 4)
+
+d <- ggplot(df6 %>% filter(forest_type == "Mesic mixed conifer"),
+            aes(x = species, y = mean_ba_ac, fill = Visit)) +
+  geom_col(position = position_dodge(0.9)) +
+  geom_errorbar(aes(ymin = mean_ba_ac - se_ba_ac,
+                    ymax = mean_ba_ac + se_ba_ac),
+                width = 0,
+                position = position_dodge(0.9)) +
+  labs(x = NULL, y = exp) +
+  scale_fill_manual(values = c("gray30", "gray50", "gray70")) +
+  theme_classic()+
+  annotate("text", x = 0.5, y = 40, hjust = 0, label = "Mesic mixed conifer,\nn=18", size = 4)
+
+ggarrange(c, d, nrow = 2)
+ggsave("spec_by_forest.png", width = 7, heigh = 5, units = "in", dpi = 600)
 
 # output ####
 ## statistics ####
@@ -319,9 +428,13 @@ df5
 df6
 
 ## plots ####
-by_visit
-by_visit_and_trt
-by_visit_and_forest
+# all stats by plot
+by_visit_and_trt_mech
+by_visit_and_trt_rx
+by_visit_and_forest_dry
+by_visit_and_forest_mesic
+# ba by species
 a
 b
 c
+d
